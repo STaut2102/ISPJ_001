@@ -16,8 +16,11 @@ def load_assets():
 
 en_model, df1 = load_assets()
 
-# แปลงชื่ออาหารเป็นเลข (Manual Mapping จากข้อมูลจริง)
+# 1. แปลงคอลัมน์ Cuisine ให้เป็น String ทั้งหมดและตัดค่าว่างออก
+df1['Cuisine'] = df1['Cuisine'].fillna('Other').astype(str)
+# 2. ดึงรายชื่ออาหารมาเรียงลำดับใหม่
 cuisine_list = sorted(df1['Cuisine'].unique().tolist())
+# 3. สร้าง Map สำหรับแปลงเป็นตัวเลข
 cuisine_map = {name: i for i, name in enumerate(cuisine_list)}
 
 # --- หน้าจอหลัก ---
@@ -29,8 +32,9 @@ menu = st.sidebar.selectbox("เลือกเมนู", ["Dashboard ข้อ
 if menu == "Dashboard ข้อมูล":
     st.header("📊 ข้อมูลร้านอาหารในระบบ")
     st.bar_chart(df1['Cuisine'].value_counts())
-    st.write("ราคาเฉลี่ยต่อจาน:")
-    st.line_chart(df1.groupby('Cuisine')['Avg_Price'].mean())
+    st.write("ราคาเฉลี่ยต่อจานแยกตามประเภท:")
+    avg_price_chart = df1.groupby('Cuisine')['Avg_Price'].mean()
+    st.line_chart(avg_price_chart)
 
 else:
     st.header("🔮 ลองทำนายธุรกิจของคุณ")
@@ -39,12 +43,14 @@ else:
     u_s = st.slider("คะแนนทำเล (1-10)", 0.0, 10.0, 7.0)
     u_ch = st.number_input("ยอด Check-in โซเชียล", min_value=0, value=500)
     
-    if st.button("ประมวลผลด้วย AI"):
+    if st.button("ประมวลผลด้วย AI", use_container_width=True):
+        # แปลง Input เป็นตัวเลขตาม Map ที่สร้างไว้
         input_data = np.array([[cuisine_map[u_c], u_p, u_s, u_ch]])
         res = en_model.predict(input_data)
         
+        st.divider()
         if res[0] == 1:
-            st.success("🎉 ร้านนี้รุ่งชัวร์!")
+            st.success("🎉 รุ่งแน่แม่จ๋า")
             st.balloons()
         else:
-            st.error("⚠️ ร้านนี้มีความเสี่ยงสูงปรับปรุงด่วน")
+            st.error("⚠️ เสี่ยงไปหน่อย อย่าปล่อยผ่าน")
