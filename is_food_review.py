@@ -1,65 +1,58 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.ensemble import RandomForestClassifier, VotingClassifier
 from sklearn.linear_model import LogisticRegression
-from xgboost import XGBClassifier 
+from xgboost import XGBClassifier
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout
 
-# --- โหลด Data และ Model ---
-@st.cache_resource
-def load_assets():
-    # ตรวจสอบว่ามีไฟล์ ensemble_model.pkl และ restaurant_data.csv ใน GitHub แล้ว
-    with open('ensemble_model.pkl', 'rb') as f: 
-        en_model = pickle.load(f)
-    df = pd.read_csv('restaurant_data.csv')
-    
-    # --- Data Cleaning ป้องกัน Error ---
-    df['Cuisine'] = df['Cuisine'].fillna('Other').astype(str)
-    # บรรทัดนี้สำคัญ: ป้องกัน TypeError จากค่าราคาที่ไม่ใช่ตัวเลข
-    df['Avg_Price'] = pd.to_numeric(df['Avg_Price'], errors='coerce').fillna(0)
-    
-    return en_model, df
+# 1. โหลดข้อมูลจากขั้นตอนที่ 1
+df = pd.read_csv('data_restaurant.csv')
 
-en_model, df1 = load_assets()
+# 2. กระบวนการเตรียมข้อมูล (Data Preparation)
+le = LabelEncoder()
+df['Cuisine_Enc'] = le.fit_transform(df['Cuisine'])
 
-# เตรียมข้อมูลสำหรับ Selectbox
-cuisine_list = sorted(df1['Cuisine'].unique().tolist())
-cuisine_map = {name: i for i, name in enumerate(cuisine_list)}
+# เลือก Features หลัก: ประเภทอาหาร, ราคา, ทำเล, เช็คอิน
+X = df[['Cuisine_Enc', 'Avg_Price', 'Location_Score', 'Social_Checkin']]
+y = df['Status']
 
-# --- หน้าจอหลัก ---
-st.set_page_config(page_title="AI Restaurant SUCCESS", layout="centered")
-st.title("🍔 AI พยากรณ์ความสำเร็จร้านอาหาร")
+# --- การทำ Scaling (หัวใจสำคัญของความเสถียร) ---
+# วิธีนี้จะปรับให้ตัวเลขหลักหน่วย (ทำเล) และหลักพัน (เช็คอิน) มีน้ำหนักเท่ากันในสายตา AI
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
 
-menu = st.sidebar.selectbox("เลือกเมนู", ["Dashboard ข้อมูล", "ทำนายโอกาสรอด"])
+# 3. พัฒนาโมเดล 1: Machine Learning (Ensemble - Soft Voting)
+# ผสม 3 เทคนิคเพื่อให้ได้ความแม่นยำสูงและบอกเป็น % ได้
+m1 = RandomForestClassifier(n_estimators=100, random_state=42)
+m2 = XGBClassifier(eval_metric='logloss', random_state=42)
+m3 = LogisticRegression(random_state=42)
 
-if menu == "Dashboard ข้อมูล":
-    st.header("📊 ข้อมูลร้านอาหารในระบบ")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.write("**จำนวนร้านแยกตามประเภท**")
-        st.bar_chart(df1['Cuisine'].value_counts())
-    with col2:
-        st.write("**ราคาเฉลี่ยต่อจาน (บาท)**")
-        # คำนวณค่าเฉลี่ยเฉพาะคอลัมน์ที่เป็นตัวเลข
-        avg_price_chart = df1.groupby('Cuisine')['Avg_Price'].mean()
-        st.line_chart(avg_price_chart)
+ensemble_model = VotingClassifier(
+    estimators=[('rf', m1), ('xgb', m2), ('lr', m3)], 
+    voting='soft' # ใช้ soft เพื่อให้คำนวณออกมาเป็นความน่าจะเป็น (%)
+)
+ensemble_model.fit(X_scaled, y)
 
-else:
-    st.header("🔮 ลองทำนายธุรกิจของคุณ")
-    u_c = st.selectbox("ประเภทอาหาร", cuisine_list)
-    u_p = st.number_input("ราคาสินค้าเฉลี่ย (บาท)", min_value=0, value=150)
-    u_s = st.slider("คะแนนทำเล (1-10)", 0.0, 10.0, 7.0)
-    u_ch = st.number_input("ยอด Check-in โซเชียล", min_value=0, value=500)
-    
-    if st.button("ประมวลผลด้วย AI", use_container_width=True):
-        # แปลง Input เป็นตัวเลขตาม Map ที่สร้างไว้เพื่อให้ Model อ่านได้
-        input_data = np.array([[cuisine_map[u_c], u_p, u_s, u_ch]])
-        res = en_model.predict(input_data)
-        
-        st.divider()
-        if res[0] == 1:
-            st.success("🎉 รุ่งแน่แม่จ๋า")
-            st.balloons()
-        else:
-            st.error("⚠️ เสี่ยงไปหน่อย อย่าปล่อยผ่าน")
+# 4. พัฒนาโมเดล 2: Neural Network (ANN)
+# ออกแบบโครงสร้างเอง: 4 Input -> 16 Neurons -> 8 Neurons -> 1 Output
+model_nn = Sequential([
+    Dense(16, activation='relu', input_shape=(4,)),
+    Dropout(0.2), # ลดความเสี่ยงในการจำคำตอบ (Overfitting)
+    Dense(8, activation='relu'),
+    Dense(1, activation='sigmoid') # ทำนายผลออกมาเป็นค่าระหว่าง 0 ถึง 1
+])
+
+model_nn.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+model_nn.fit(X_scaled, y, epochs=50, verbose=0)
+
+# 5. บันทึกไฟล์ "หัวใจ" ทั้งหมดเพื่อนำไปอัปโหลดขึ้น GitHub
+with open('model_ml.pkl', 'wb') as f: pickle.dump(ensemble_model, f)
+with open('scaler.pkl', 'wb') as f: pickle.dump(scaler, f)
+with open('le_cuisine.pkl', 'wb') as f: pickle.dump(le, f)
+model_nn.save('model_nn.h5')
+
+print("✅ เตรียมข้อมูลและสร้างโมเดลทั้ง 2 ประเภท (ML & NN) เรียบร้อยแล้ว!")
