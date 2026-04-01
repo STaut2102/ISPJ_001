@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import pickle
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.linear_model import LogisticRegression
+from xgboost import XGBClassifier 
 
 # --- โหลด Data และ Model ---
 @st.cache_resource
@@ -13,45 +16,35 @@ def load_assets():
 
 en_model, df1 = load_assets()
 
-# สร้างแผนผังแปลงชื่ออาหารเป็นตัวเลขโดยอัตโนมัติจากข้อมูลใน CSV
+# แปลงชื่ออาหารเป็นเลข (Manual Mapping จากข้อมูลจริง)
 cuisine_list = sorted(df1['Cuisine'].unique().tolist())
 cuisine_map = {name: i for i, name in enumerate(cuisine_list)}
 
-# --- ส่วนของ Sidebar เมนู ---
-st.sidebar.title("🍔 Restaurant AI")
-page = st.sidebar.selectbox("เลือกหน้า", ["📊 Data Insight", "🔮 Predict Success"])
+# --- หน้าจอหลัก ---
+st.set_page_config(page_title="AI Restaurant SUCCESS", layout="centered")
+st.title("🍔 AI พยากรณ์ความสำเร็จร้านอาหาร")
 
-# --- หน้าที่ 1: Data Insight ---
-if page == "📊 Data Insight":
-    st.title("📊 Machine Learning Insight")
-    st.subheader("ภาพรวมข้อมูลร้านอาหาร")
+menu = st.sidebar.selectbox("เลือกเมนู", ["Dashboard ข้อมูล", "ทำนายโอกาสรอด"])
+
+if menu == "Dashboard ข้อมูล":
+    st.header("📊 ข้อมูลร้านอาหารในระบบ")
     st.bar_chart(df1['Cuisine'].value_counts())
-    st.write("ราคาเฉลี่ยแยกตามประเภทอาหาร")
+    st.write("ราคาเฉลี่ยต่อจาน:")
     st.line_chart(df1.groupby('Cuisine')['Avg_Price'].mean())
 
-# --- หน้าที่ 2: Predict Success ---
-elif page == "🔮 Predict Success":
-    st.title("🔮 พยากรณ์โอกาสสำเร็จของร้าน")
-    st.info("ระบุข้อมูลร้านของคุณเพื่อดูแนวโน้มการทำธุรกิจ")
+else:
+    st.header("🔮 ลองทำนายธุรกิจของคุณ")
+    u_c = st.selectbox("ประเภทอาหาร", cuisine_list)
+    u_p = st.number_input("ราคาสินค้าเฉลี่ย (บาท)", min_value=0, value=150)
+    u_s = st.slider("คะแนนทำเล (1-10)", 0.0, 10.0, 7.0)
+    u_ch = st.number_input("ยอด Check-in โซเชียล", min_value=0, value=500)
     
-    col1, col2 = st.columns(2)
-    with col1:
-        u_cuisine = st.selectbox("เลือกประเภทอาหาร", cuisine_list)
-        u_price = st.number_input("ราคาเฉลี่ยต่อหัว (บาท)", min_value=0, value=200)
-    with col2:
-        u_score = st.slider("คะแนนทำเล (1-10)", 0.0, 10.0, 5.0)
-        u_checkin = st.number_input("ยอด Social Check-in", min_value=0, value=100)
-    
-    if st.button("เริ่มทำการพยากรณ์"):
-        # แปลงชื่ออาหารเป็นตัวเลขโดยใช้ Map ที่เราสร้างไว้ข้างบน
-        c_encoded = cuisine_map[u_cuisine]
-        input_data = np.array([[c_encoded, u_price, u_score, u_checkin]])
+    if st.button("ประมวลผลด้วย AI"):
+        input_data = np.array([[cuisine_map[u_c], u_p, u_s, u_ch]])
+        res = en_model.predict(input_data)
         
-        prediction = en_model.predict(input_data)
-        
-        st.divider()
-        if prediction[0] == 1:
-            st.success("🎉 โอกาสรุ่งสูงมาก!")
+        if res[0] == 1:
+            st.success("🎉 ร้านนี้รุ่งชัวร์!")
             st.balloons()
         else:
-            st.error("⚠️ มีความเสี่ยง อาจต้องปรับกลยุทธ์")
+            st.error("⚠️ ร้านนี้มีความเสี่ยงสูงปรับปรุงด่วน")
